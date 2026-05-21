@@ -18,10 +18,9 @@ class _TopologyScreenState extends State<TopologyScreen> {
   late Graph _graph;
   late BuchheimWalkerConfiguration _config;
   late BuchheimWalkerAlgorithm _algorithm;
+  late GraphViewController _controller;
 
-  final Set<String> _collapsed = {};
   MockNode? _selectedNode;
-  int _rebuildCount = 0;
 
   final Map<String, Node> _nodeMap = {};
   final Map<String, String> _edgeLabels = {};
@@ -32,13 +31,7 @@ class _TopologyScreenState extends State<TopologyScreen> {
   @override
   void initState() {
     super.initState();
-    _rebuildAll();
-
-  }
-
-  void _rebuildAll() {
-    _rebuildCount++;
-    _edgeLabels.clear();
+    _controller = GraphViewController();
     _config = BuchheimWalkerConfiguration()
       ..siblingSeparation = 80
       ..levelSeparation = 130
@@ -54,6 +47,7 @@ class _TopologyScreenState extends State<TopologyScreen> {
   void _buildGraph() {
     _graph = Graph()..isTree = true;
     _nodeMap.clear();
+    _edgeLabels.clear();
 
     for (final mock in mockNodes) {
       _nodeMap[mock.id] = Node.Id(mock.id);
@@ -65,8 +59,6 @@ class _TopologyScreenState extends State<TopologyScreen> {
   }
 
   void _addChildren(String parentId) {
-    if (_collapsed.contains(parentId)) return;
-
     for (final child in mockNodes.where((n) => n.parentId == parentId)) {
       final edgePaint = Paint()
         ..color = child.connected ? const Color(0xFF4CAF50) : const Color(0xFFF44336)
@@ -90,15 +82,17 @@ class _TopologyScreenState extends State<TopologyScreen> {
   }
 
   void _toggleCollapse(String nodeId) {
+    _controller.toggleNodeExpanded(_graph, _nodeMap[nodeId]!, animate: true);
     setState(() {
-      if (_collapsed.contains(nodeId)) {
-        _collapsed.remove(nodeId);
-      } else {
-        _collapsed.add(nodeId);
-      }
-      _rebuildAll();
       if (_selectedNode?.id == nodeId) _selectedNode = null;
     });
+  }
+
+  void _expandAll() {
+    for (final node in _controller.collapsedNodes.keys.toList()) {
+      _controller.expandNode(_graph, node);
+    }
+    setState(() => _selectedNode = null);
   }
 
   int _descendantCount(String id) {
@@ -123,11 +117,7 @@ class _TopologyScreenState extends State<TopologyScreen> {
           IconButton(
             tooltip: 'Expandir todo',
             icon: const Icon(Icons.account_tree_outlined, color: Colors.white70),
-            onPressed: () => setState(() {
-              _collapsed.clear();
-              _selectedNode = null;
-              _rebuildAll();
-            }),
+            onPressed: _expandAll,
           ),
         ],
       ),
@@ -135,33 +125,29 @@ class _TopologyScreenState extends State<TopologyScreen> {
         children: [
           const TopologyLegend(),
           Expanded(
-            child: InteractiveViewer(
-              constrained: false,
-              boundaryMargin: const EdgeInsets.all(200),
-              minScale: 0.25,
-              maxScale: 4.0,
-              child: GraphView(
-                key: ValueKey(_rebuildCount),
-                graph: _graph,
-                algorithm: _algorithm,
-                paint: Paint()
-                  ..color = Colors.grey.shade700
-                  ..strokeWidth = 1.5
-                  ..style = PaintingStyle.stroke,
-                builder: (Node node) {
-                  final id = node.key!.value as String;
-                  final mock = mockNodes.firstWhere((n) => n.id == id);
-                  return NodeWidget(
-                    mock: mock,
-                    isSelected: _selectedNode?.id == id,
-                    isCollapsed: _collapsed.contains(id),
-                    hasChildren: _hasChildren(id),
-                    hiddenCount: _collapsed.contains(id) ? _descendantCount(id) : 0,
-                    onTap: () => _onNodeTap(mock),
-                    onToggleCollapse: _hasChildren(id) ? () => _toggleCollapse(id) : null,
-                  );
-                },
-              ),
+            child: GraphView.builder(
+              graph: _graph,
+              algorithm: _algorithm,
+              controller: _controller,
+              animated: true,
+              paint: Paint()
+                ..color = Colors.grey.shade700
+                ..strokeWidth = 1.5
+                ..style = PaintingStyle.stroke,
+              builder: (Node node) {
+                final id = node.key!.value as String;
+                final mock = mockNodes.firstWhere((n) => n.id == id);
+                final isCollapsed = _controller.isNodeCollapsed(node);
+                return NodeWidget(
+                  mock: mock,
+                  isSelected: _selectedNode?.id == id,
+                  isCollapsed: isCollapsed,
+                  hasChildren: _hasChildren(id),
+                  hiddenCount: isCollapsed ? _descendantCount(id) : 0,
+                  onTap: () => _onNodeTap(mock),
+                  onToggleCollapse: _hasChildren(id) ? () => _toggleCollapse(id) : null,
+                );
+              },
             ),
           ),
           AnimatedSize(
@@ -169,7 +155,7 @@ class _TopologyScreenState extends State<TopologyScreen> {
             child: _selectedNode != null
                 ? TopologyInfoCard(
                     node: _selectedNode!,
-                    isCollapsed: _collapsed.contains(_selectedNode!.id),
+                    isCollapsed: _controller.isNodeCollapsed(_nodeMap[_selectedNode!.id]!),
                     hasChildren: _hasChildren(_selectedNode!.id),
                     onToggleCollapse: () => _toggleCollapse(_selectedNode!.id),
                     onClose: () => setState(() => _selectedNode = null),
