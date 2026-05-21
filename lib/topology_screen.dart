@@ -7,6 +7,7 @@ import 'widgets/info_card.dart';
 import 'widgets/legend.dart';
 import 'widgets/labeled_tree_edge_renderer.dart';
 
+
 class TopologyScreen extends StatefulWidget {
   const TopologyScreen({super.key});
 
@@ -17,9 +18,10 @@ class TopologyScreen extends StatefulWidget {
 class _TopologyScreenState extends State<TopologyScreen> {
   late Graph _graph;
   late BuchheimWalkerConfiguration _config;
-  late BuchheimWalkerAlgorithm _algorithm;
+  late Algorithm _algorithm;
   late GraphViewController _controller;
 
+  bool _useRadial = false;
   MockNode? _selectedNode;
 
   final Map<String, Node> _nodeMap = {};
@@ -37,11 +39,22 @@ class _TopologyScreenState extends State<TopologyScreen> {
       ..levelSeparation = 130
       ..subtreeSeparation = 100
       ..orientation = BuchheimWalkerConfiguration.ORIENTATION_TOP_BOTTOM;
-    _algorithm = BuchheimWalkerAlgorithm(
-      _config,
-      LabeledTreeEdgeRenderer(_config, labels: _edgeLabels),
-    );
+    _buildAlgorithm();
     _buildGraph();
+  }
+
+  void _buildAlgorithm() {
+    final renderer = LabeledTreeEdgeRenderer(_config, labels: _edgeLabels);
+    _algorithm = _useRadial
+        ? RadialTreeLayoutAlgorithm(_config, renderer)
+        : BuchheimWalkerAlgorithm(_config, renderer);
+  }
+
+  void _toggleLayout() {
+    setState(() {
+      _useRadial = !_useRadial;
+      _buildAlgorithm();
+    });
   }
 
   void _buildGraph() {
@@ -115,8 +128,16 @@ class _TopologyScreenState extends State<TopologyScreen> {
         title: const Text('Topología de Red', style: TextStyle(color: Colors.white)),
         actions: [
           IconButton(
+            tooltip: _useRadial ? 'Vista árbol' : 'Vista radial',
+            icon: Icon(
+              _useRadial ? Icons.account_tree_outlined : Icons.radar,
+              color: Colors.white70,
+            ),
+            onPressed: _toggleLayout,
+          ),
+          IconButton(
             tooltip: 'Expandir todo',
-            icon: const Icon(Icons.account_tree_outlined, color: Colors.white70),
+            icon: const Icon(Icons.unfold_more, color: Colors.white70),
             onPressed: _expandAll,
           ),
         ],
