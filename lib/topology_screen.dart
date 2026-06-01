@@ -20,8 +20,10 @@ class _TopologyScreenState extends State<TopologyScreen> {
   late BuchheimWalkerConfiguration _config;
   late Algorithm _algorithm;
   late GraphViewController _controller;
+  late TransformationController _transformationController;
 
   bool _useRadial = false;
+  bool _showDebugAxes = false;
   MockNode? _selectedNode;
 
   final Map<String, Node> _nodeMap = {};
@@ -33,7 +35,8 @@ class _TopologyScreenState extends State<TopologyScreen> {
   @override
   void initState() {
     super.initState();
-    _controller = GraphViewController();
+    _transformationController = TransformationController();
+    _controller = GraphViewController(transformationController: _transformationController);
     _config = BuchheimWalkerConfiguration()
       ..siblingSeparation = 80
       ..levelSeparation = 130
@@ -120,6 +123,12 @@ class _TopologyScreenState extends State<TopologyScreen> {
   bool _hasChildren(String id) => mockNodes.any((n) => n.parentId == id);
 
   @override
+  void dispose() {
+    _transformationController.dispose();
+    super.dispose();
+  }
+
+  @override
   Widget build(BuildContext context) {
     return Scaffold(
       backgroundColor: _bgColor,
@@ -136,6 +145,14 @@ class _TopologyScreenState extends State<TopologyScreen> {
             onPressed: _toggleLayout,
           ),
           IconButton(
+            tooltip: _showDebugAxes ? 'Ocultar ejes (0,0)' : 'Mostrar ejes (0,0)',
+            icon: Icon(
+              Icons.grid_on,
+              color: _showDebugAxes ? Colors.yellowAccent : Colors.white70,
+            ),
+            onPressed: () => setState(() => _showDebugAxes = !_showDebugAxes),
+          ),
+          IconButton(
             tooltip: 'Expandir todo',
             icon: const Icon(Icons.unfold_more, color: Colors.white70),
             onPressed: _expandAll,
@@ -146,29 +163,43 @@ class _TopologyScreenState extends State<TopologyScreen> {
         children: [
           const TopologyLegend(),
           Expanded(
-            child: GraphView.builder(
-              graph: _graph,
-              algorithm: _algorithm,
-              controller: _controller,
-              animated: true,
-              paint: Paint()
-                ..color = Colors.grey.shade700
-                ..strokeWidth = 1.5
-                ..style = PaintingStyle.stroke,
-              builder: (Node node) {
-                final id = node.key!.value as String;
-                final mock = mockNodes.firstWhere((n) => n.id == id);
-                final isCollapsed = _controller.isNodeCollapsed(node);
-                return NodeWidget(
-                  mock: mock,
-                  isSelected: _selectedNode?.id == id,
-                  isCollapsed: isCollapsed,
-                  hasChildren: _hasChildren(id),
-                  hiddenCount: isCollapsed ? _descendantCount(id) : 0,
-                  onTap: () => _onNodeTap(mock),
-                  onToggleCollapse: _hasChildren(id) ? () => _toggleCollapse(id) : null,
-                );
-              },
+            child: Stack(
+              children: [
+                GraphView.builder(
+                  graph: _graph,
+                  algorithm: _algorithm,
+                  controller: _controller,
+                  animated: true,
+                  paint: Paint()
+                    ..color = Colors.grey.shade700
+                    ..strokeWidth = 1.5
+                    ..style = PaintingStyle.stroke,
+                  builder: (Node node) {
+                    final id = node.key!.value as String;
+                    final mock = mockNodes.firstWhere((n) => n.id == id);
+                    final isCollapsed = _controller.isNodeCollapsed(node);
+                    return NodeWidget(
+                      mock: mock,
+                      isSelected: _selectedNode?.id == id,
+                      isCollapsed: isCollapsed,
+                      hasChildren: _hasChildren(id),
+                      hiddenCount: isCollapsed ? _descendantCount(id) : 0,
+                      onTap: () => _onNodeTap(mock),
+                      onToggleCollapse: _hasChildren(id) ? () => _toggleCollapse(id) : null,
+                    );
+                  },
+                ),
+                if (_showDebugAxes)
+                  IgnorePointer(
+                    child: AnimatedBuilder(
+                      animation: _transformationController,
+                      builder: (context, _) => CustomPaint(
+                        painter: _DebugAxesPainter(_transformationController.value),
+                        child: const SizedBox.expand(),
+                      ),
+                    ),
+                  ),
+              ],
             ),
           ),
           AnimatedSize(
@@ -187,4 +218,46 @@ class _TopologyScreenState extends State<TopologyScreen> {
       ),
     );
   }
+}
+
+class _DebugAxesPainter extends CustomPainter {
+  final Matrix4 transform;
+
+  _DebugAxesPainter(this.transform);
+
+  @override
+  void paint(Canvas canvas, Size size) {
+    // El origen (0,0) del grafo transformado a coordenadas de pantalla
+    final origin = MatrixUtils.transformPoint(transform, Offset.zero);
+
+    final linePaint = Paint()
+      ..strokeWidth = 2.0
+      ..style = PaintingStyle.stroke;
+
+    // Línea vertical en x=0 (amarillo)
+    linePaint.color = const Color(0xCCFFEB3B);
+    canvas.drawLine(Offset(origin.dx, 0), Offset(origin.dx, size.height), linePaint);
+
+    // Línea horizontal en y=0 (cian)
+    linePaint.color = const Color(0xCC00BCD4);
+    canvas.drawLine(Offset(0, origin.dy), Offset(size.width, origin.dy), linePaint);
+
+    // Etiquetas
+    final textStyle = const TextStyle(fontSize: 11, fontWeight: FontWeight.bold);
+    _drawLabel(canvas, 'x=0 (neg ←  · → pos)', Offset(origin.dx + 6, 6),
+        const Color(0xCCFFEB3B), textStyle);
+    _drawLabel(canvas, 'y=0 (neg ↑  · ↓ pos)', Offset(6, origin.dy + 4),
+        const Color(0xCC00BCD4), textStyle);
+  }
+
+  void _drawLabel(Canvas canvas, String text, Offset pos, Color color, TextStyle style) {
+    final painter = TextPainter(
+      text: TextSpan(text: text, style: style.copyWith(color: color)),
+      textDirection: TextDirection.ltr,
+    )..layout();
+    painter.paint(canvas, pos);
+  }
+
+  @override
+  bool shouldRepaint(_DebugAxesPainter old) => transform != old.transform;
 }
